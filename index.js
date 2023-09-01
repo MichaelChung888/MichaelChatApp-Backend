@@ -27,7 +27,7 @@ app.use("/uploads", express.static(__dirname + "/uploads")); //Allows you to acc
 app.use(express.json()); //Parses incoming requests bodies   with JSON payloads
 app.use(cookieParser()); //Parses incoming cookies
 app.use(cors({
-    origin: ["https://michaelchatapp1.onrender.com", "https://michaelchatapp2.onrender.com"], //"http://localhost:5174", "http://localhost:5173" //NOTE: true = Anywhere can send a request
+    origin: ["https://michaelchatapp.onrender.com"], //"http://localhost:5174", "http://localhost:5173" //NOTE: true = Anywhere can send a request
     credentials: true, //credentials include cookies, authorization headers, and TLS client certificates
     methods: ["GET", "POST"]
 }));
@@ -161,7 +161,7 @@ wss.on("connection", (connection, req) => { //On any req made from client to ini
         clearTimeout(connection.deathTimer);
     });
 
-    // Reads the user and id from the cookie(through jwt.verify decryption) or this connection
+    // Reads the user and id from the cookie(through jwt.verify decryption) upon first connection
     const cookies = req.headers.cookie;
     if (cookies) {
         const tokenCookieString = cookies.split(";").find(str => str.startsWith("token="));

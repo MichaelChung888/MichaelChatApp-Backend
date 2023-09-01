@@ -27,7 +27,7 @@ app.use("/uploads", express.static(__dirname + "/uploads")); //Allows you to acc
 app.use(express.json()); //Parses incoming requests bodies   with JSON payloads
 app.use(cookieParser()); //Parses incoming cookies
 app.use(cors({
-    origin: ["https://michaelchatapp.onrender.com/"], //"http://localhost:5174", "http://localhost:5173" //NOTE: true = Anywhere can send a request
+    origin: ["https://michaelchatapp.onrender.com"], //"http://localhost:5174", "http://localhost:5173" //NOTE: true = Anywhere can send a request
     credentials: true, //credentials include cookies, authorization headers, and TLS client certificates
     methods: ["GET", "POST"]
 }));

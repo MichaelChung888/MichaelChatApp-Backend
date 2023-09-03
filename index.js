@@ -11,9 +11,10 @@ const fs = require("fs");
 
 
 
-//IRRELEVANT, CALL THIS FUNCTION IF YOU WANT TO CLEAR MESSAGES DATABASE
-async function deleteMessages() {
+//IRRELEVANT, CALL THIS FUNCTION IF YOU WANT TO CLEAR MESSAGES and USERS IN DATABASE
+async function deleteDatabase() {
     await Message.deleteMany({});
+    await User.deleteMany({});
 }
 
 
@@ -27,7 +28,7 @@ app.use("/uploads", express.static(__dirname + "/uploads")); //Allows you to acc
 app.use(express.json()); //Parses incoming requests bodies   with JSON payloads
 app.use(cookieParser()); //Parses incoming cookies
 app.use(cors({
-    origin: ["https://michaelchatapp.onrender.com"], //"http://localhost:5174", "http://localhost:5173" //NOTE: true = Anywhere can send a request
+    origin: ["https://michaelchatapp.onrender.com"], // "http://localhost:5174", "http://localhost:5173"], //NOTE: true = Anywhere can send a request
     credentials: true, //credentials include cookies, authorization headers, and TLS client certificates
     methods: ["GET", "POST"]
 }));
@@ -35,6 +36,7 @@ app.use(cors({
 const bcryptSalt = bcryptjs.genSaltSync(10);
 
 async function getUserDataFromRequestCookie(req) {
+    /*
     return new Promise((resolve, reject) => {
         const token = req.cookies?.token; //If req.cookies.token is undefined or null, return undefined (instead of throwing an error).
         if (token) {
@@ -46,6 +48,24 @@ async function getUserDataFromRequestCookie(req) {
             reject("No Token");
         }
     });
+    */
+   return new Promise((resolve, reject) => {
+    const token = req.cookies?.token; //If req.cookies.token is undefined or null, return undefined (instead of throwing an error).
+    if (token) {
+        jwt.verify(token, process.env.JWT, {}, async (err, result) => { //Verifies that the token is valid and decodes it back to normal, returned as "result".
+            if (err) throw err;
+            const searchUser = result.userId;
+            const foundUser = await User.findOne({ _id: searchUser }); //Checks User exists first
+            if (foundUser) resolve(result); //Sends back the "result" to front-end after token has been decoded.
+            else {
+                await Message.deleteMany({$or: [ {sender: searchUser}, {recipient: searchUser} ]});
+                reject("DeleteToken");
+            }
+        });
+    } else {
+        reject("NoToken");
+    }    
+   });
 }
 
 app.get("/test", (req, res) => { //Testing server by running get request on localhost/4000/test
@@ -56,21 +76,22 @@ app.get("/", (req, res) => {
     res.json("Server Online");
 });
 
-app.get("/profile", (req, res) => { //FETCHING USER DATA FROM DB
-    const token = req.cookies?.token; //If req.cookies.token is undefined or null, return undefined (instead of throwing an error).
-    if (token) {
-        jwt.verify(token, process.env.JWT, {}, (err, result) => { //Verifies that the token is valid and decodes it back to normal, returned as "result".
-            if (err) throw err;
-            res.json(result); //Sends back the "result" to front-end after token has been decoded.
-        });
-    } else {
-        res.status(401).json('no token');
-    }
+app.get("/profile", async (req, res) => { //FETCHING USER DATA FROM DB
+    await getUserDataFromRequestCookie(req).then((result) => {
+        res.json(result);
+    }).catch((err) => {
+        if (err === "DeleteToken") {
+            res.cookie("token", "", { sameSite: "none", secure: true }).status(401).json("User not found"); //Difference here is the cookie returned has an empty token now upon logging out
+        }
+        else if (err === "NoToken") {
+            res.status(401).json('No cookie or token');
+        }
+    });
 });
 
 app.post("/login", async (req, res) => { //LOGIN EXISTING USER
     const { username, password } = req.body;
-    const foundUser = await User.findOne({ username });
+    const foundUser = await User.findOne({ username: username });
     if (foundUser) {
         const isSame = bcryptjs.compareSync(password, foundUser.password);
         if (isSame) {
@@ -82,14 +103,17 @@ app.post("/login", async (req, res) => { //LOGIN EXISTING USER
             });
         }
         else {
-            res.status(401).json("Incorrect Password");
+            res.status(401).json("incorrect");
         }
+    }
+    else {
+        res.status(401).json("notFound");
     }
 });
 
 app.post("/logout", (req, res) => {
     res.cookie("token", "", { sameSite: "none", secure: true }).status(201).json("ok"); //Difference here is the cookie returned has an token now upon logging out
-})
+});
 
 app.post("/register", async (req, res) => { //REGISTER NEW USER
     const { username, password } = req.body;
@@ -106,7 +130,7 @@ app.post("/register", async (req, res) => { //REGISTER NEW USER
             });                                                                           //Note: secure:true ensures cookie that we have securely encoded our message(using JWT)
         });
     } catch (err) {
-        res.status(401).json("Name already taken");
+        res.status(401).json("nameUsed");
     }
 
 });
@@ -115,9 +139,9 @@ app.get("/messages/:userId", async (req, res) => { //NOTE: the "":userId" is an 
     const { userId } = req.params;
     const userData = await getUserDataFromRequestCookie(req);
     const ourUserId = userData.userId;
-    const messages = await Message.find({       //"$in" searches values of a field that matches any value in the specified array. We want all messages where:
-        sender: { $in: [userId, ourUserId] },     //1)Either we are recipient and the other is sender
-        recipient: { $in: [userId, ourUserId] }   //2)Or the other is recipient and we are the sender
+    const messages = await Message.find({         //"$in" searches values of a field that matches any value in the specified array. We want all messages where:
+        sender: { $in: [userId, ourUserId] },     //1)sender = userId or ourUserId
+        recipient: { $in: [userId, ourUserId] }   //2)recipient = userId or ourUserId
     }).sort({ createdAt: 1 }); //Sort messages in chronological order timestamp
     res.json(messages);
 })
@@ -140,7 +164,9 @@ wss.on("connection", (connection, req) => { //On any req made from client to ini
         // Notify everyone about online people (when someone connects)
         [...wss.clients].forEach(client => {
             client.send(JSON.stringify(
-                { online: [...wss.clients].map(e => ({ userId: e.userId, username: e.username })) } //object online: which contains objects of all online users
+                { online: [...wss.clients]
+                    .filter(e => e.userId !== undefined) //Incase there is an undefined bugged client 
+                    .map(e => ({ userId: e.userId, username: e.username })) } //object online: which contains objects of all online users
             ));
         });
     }
@@ -149,13 +175,20 @@ wss.on("connection", (connection, req) => { //On any req made from client to ini
 
     connection.timer = setInterval(() => {
         connection.ping(); //constantly sending "pings" to client to check if connection is still alive
+
+        /*
+        const test = {};
+        [...wss.clients].forEach(e => test[e.userId] = e.username);
+        console.log(test);
+        */
+
         connection.deathTimer = setTimeout(() => { //If haven't recieved "pong" in the next second, isAlive becomes false
             connection.isAlive = false;
             clearInterval(connection.timer);
             connection.terminate(); //Kill the connection
             notifyAboutOnlinePeople();
         }, 1000);
-    }, 5000);
+    }, 3500);
 
     connection.on("pong", () => {
         clearTimeout(connection.deathTimer);
@@ -212,6 +245,8 @@ wss.on("connection", (connection, req) => { //On any req made from client to ini
         }
     });
 
-    notifyAboutOnlinePeople();
+    //console.log(req.connection.remoteAddress);
+
+    notifyAboutOnlinePeople(); //Let everyone know your online upon logging in
 
 });

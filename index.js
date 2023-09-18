@@ -36,19 +36,6 @@ app.use(cors({
 const bcryptSalt = bcryptjs.genSaltSync(10);
 
 async function getUserDataFromRequestCookie(req) {
-    /*
-    return new Promise((resolve, reject) => {
-        const token = req.cookies?.token; //If req.cookies.token is undefined or null, return undefined (instead of throwing an error).
-        if (token) {
-            jwt.verify(token, process.env.JWT, {}, (err, result) => { //Verifies that the token is valid and decodes it back to normal, returned as "result".
-                if (err) throw err;
-                resolve(result); //Sends back the "result" to front-end after token has been decoded.
-            });
-        } else {
-            reject("No Token");
-        }
-    });
-    */
    return new Promise((resolve, reject) => {
     const token = req.cookies?.token; //If req.cookies.token is undefined or null, return undefined (instead of throwing an error).
     if (token) {
@@ -215,37 +202,29 @@ wss.on("connection", (connection, req) => { //On any req made from client to ini
     connection.on("message", async message => {
         const messageData = JSON.parse(message.toString());
         const { recipient, text, file } = messageData;
-        let filename = null
+        let fileType = null;
         if (file) {
             const parts = file.name.split(".");
             const ext = parts[parts.length - 1];
-            filename = Date.now() + "." + ext;
-            const path = __dirname + "/uploads/" + filename;
-            const bufferData = new Buffer(file.data.split(",")[1], "base64");
-            fs.writeFile(path, bufferData, () => {
-                console.log("file saved: " + path);
-            });
+            fileType = ["jpg", "jpeg", "png", "gif"].includes(ext) ?  "img" : "other";
         }
-        if (recipient && ( text || file)) {
-            const createdMessage = await Message.create({ //Registering a new message into Mongo database
-                sender: connection.userId,
-                recipient: recipient,
-                text: text,
-                file: file ? filename : null
-            });
-            [...wss.clients]
-                .filter(e => e.userId === recipient) //Locate the recipient that client is sending message to
-                .forEach(e => e.send(JSON.stringify({ //Send the message as the following JSON object
-                    text: text,
-                    sender: connection.userId,
-                    recipient: recipient,
-                    file: file ? filename : null,
-                    _id: createdMessage._id,
-                })));
-        }
+        const createdMessage = await Message.create({ //Registering a new message into Mongo database
+            sender: connection.userId,
+            recipient: recipient,
+            text: text,
+            file: file ? { data: file.data, name: file.name, type: fileType } : null //file ? filename : null
+        });
+        [...wss.clients]
+        .filter(e => e.userId === recipient || e.userId === connection.userId) //Locate the recipient that client is sending message to
+        .forEach(e => e.send(JSON.stringify({ //Send the message as the following JSON object
+            text: text,
+            _id: createdMessage._id,
+            sender: connection.userId,
+            recipient: recipient,
+            text: text,
+            file: file ? { data: file.data, name: file.name, type: fileType } : null
+        })));
     });
-
-    //console.log(req.connection.remoteAddress);
 
     notifyAboutOnlinePeople(); //Let everyone know your online upon logging in
 
